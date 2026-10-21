@@ -10,6 +10,11 @@ from app.vectorstore.collection import create_collection
 from app.vectorstore.ingestion import ingest_pdf
 from app.vectorstore.retrieval import search_documents
 
+from pydantic import BaseModel, Field
+from fastapi import HTTPException
+
+from app.rag.pipeline import answer_question
+
 app = FastAPI(
     title="KnowledgeFlow AI",
     description="Enterprise RAG & Document Intelligence Platform",
@@ -120,3 +125,42 @@ def search_document(
             status_code=500,
             detail=str(error),
         )
+
+
+# RAG
+
+class RAGQuestion(BaseModel):
+    question: str = Field(
+        ...,
+        min_length=1,
+        description="Question to answer from uploaded documents",
+    )
+    limit: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of document chunks to retrieve",
+    )
+
+
+@app.post("/rag/ask")
+def ask_documents(request: RAGQuestion):
+    try:
+        return answer_question(
+            question=request.question,
+            limit=request.limit,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        print(f"RAG pipeline error: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail="The RAG pipeline failed. Check the backend logs.",
+        ) from error
+
+
+
