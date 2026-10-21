@@ -1,9 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI,HTTPException, Query
 from app.services.llm import ask_llm
 
 from app.documents.loader import load_pdf
 from app.documents.splitter import split_documents
 
+from app.vectorstore.qdrant import get_qdrant_client
+from app.vectorstore.collection import create_collection
+
+from app.vectorstore.ingestion import ingest_pdf
+from app.vectorstore.retrieval import search_documents
 
 app = FastAPI(
     title="KnowledgeFlow AI",
@@ -50,3 +55,68 @@ def test_document_ingestion():
         "first_chunk": chunks[0].page_content,
         "first_chunk_metadata": chunks[0].metadata,
     }
+
+
+#-------------   QDRANT DATABASE  ------------
+@app.get("/qdrant/test")
+def test_qdrant():
+
+    client = get_qdrant_client()
+
+    collections = client.get_collections()
+
+    return {
+        "status": "connected",
+        "collections": [
+            collection.name
+            for collection in collections.collections
+        ],
+    }
+
+
+@app.post("/qdrant/create-collection")
+def create_qdrant_collection():
+
+    result = create_collection()
+
+    return {
+        "message": result
+    }
+    
+
+@app.post("/documents/ingest")
+def ingest_document(
+    file_path: str = Query(..., description="Path to a PDF file")
+):
+    try:
+        return ingest_pdf(file_path)
+
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+
+@app.get("/documents/search")
+def search_document(
+    question: str,
+    limit: int = Query(default=5, ge=1, le=20),
+):
+    try:
+        results = search_documents(
+            question=question,
+            limit=limit,
+        )
+
+        return {
+            "question": question,
+            "results_count": len(results),
+            "results": results,
+        }
+
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
