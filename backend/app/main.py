@@ -10,6 +10,10 @@ from app.vectorstore.collection import create_collection
 from app.vectorstore.ingestion import ingest_pdf
 from app.vectorstore.retrieval import search_documents
 
+
+from app.rag.graph import run_rag_graph
+
+
 from pydantic import BaseModel, Field
 from fastapi import HTTPException
 
@@ -164,3 +168,32 @@ def ask_documents(request: RAGQuestion):
 
 
 
+# langgraph
+@app.post("/rag/graph/ask")
+def ask_documents_with_graph(request: RAGQuestion):
+    try:
+        result = run_rag_graph(
+            question=request.question,
+            limit=request.limit,
+        )
+
+        return {
+            "question": result["question"],
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "citation_warnings": result["citation_warnings"],
+            "workflow_status": result["status"],
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        ) from error
+
+    except Exception as error:
+        print(f"LangGraph workflow error: {error}")
+        raise HTTPException(
+            status_code=500,
+            detail="The LangGraph workflow failed. Check backend logs.",
+        ) from error
