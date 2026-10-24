@@ -145,6 +145,7 @@ class RAGQuestion(BaseModel):
         le=20,
         description="Number of document chunks to retrieve",
     )
+    conversation_id: str | None = None
 
 
 @app.post("/rag/ask")
@@ -166,24 +167,16 @@ def ask_documents(request: RAGQuestion):
             detail="The RAG pipeline failed. Check the backend logs.",
         ) from error
 
+# LangGraph conversational RAG endpoint
 
-
-# langgraph
 @app.post("/rag/graph/ask")
 def ask_documents_with_graph(request: RAGQuestion):
     try:
-        result = run_rag_graph(
+        return run_rag_graph(
             question=request.question,
             limit=request.limit,
+            conversation_id=request.conversation_id,
         )
-
-        return {
-            "question": result["question"],
-            "answer": result["answer"],
-            "sources": result["sources"],
-            "citation_warnings": result["citation_warnings"],
-            "workflow_status": result["status"],
-        }
 
     except ValueError as error:
         raise HTTPException(
@@ -195,5 +188,5 @@ def ask_documents_with_graph(request: RAGQuestion):
         print(f"LangGraph workflow error: {error}")
         raise HTTPException(
             status_code=500,
-            detail="The LangGraph workflow failed. Check backend logs.",
+            detail="The LangGraph workflow failed",
         ) from error
