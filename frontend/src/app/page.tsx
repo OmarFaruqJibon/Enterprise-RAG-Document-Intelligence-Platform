@@ -82,6 +82,23 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
+  const updateActiveConversation = (
+  updates: Partial<Conversation>
+) => {
+  if (!activeConversationId) return;
+
+  setConversations((previous) =>
+    previous.map((conversation) =>
+      conversation.id === activeConversationId
+        ? {
+            ...conversation,
+            ...updates,
+            updatedAt: Date.now(),
+          }
+        : conversation
+    )
+  );
+};
 
 useEffect(() => {
   try {
@@ -124,102 +141,151 @@ useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  
+async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
 
-    const text = question.trim();
+  const text = question.trim();
 
-    if (!text || loading) return;
+  if (!text || loading) return;
 
-    setError("");
-    setQuestion("");
-    setLoading(true);
+  setError("");
+  setQuestion("");
+  setLoading(true);
 
-    const userMessage: ChatMessage = {
+  const userMessage: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: text,
+  };
+
+  const existingConversation = conversations.find(
+    (item) => item.id === activeConversationId
+  );
+
+  const frontendId =
+    existingConversation?.id ?? crypto.randomUUID();
+
+  const currentMessages = [
+    ...(existingConversation?.messages ?? messages),
+    userMessage,
+  ];
+
+  const conversation: Conversation = {
+    id: frontendId,
+    title:
+      existingConversation?.title ?? createConversationTitle(text),
+    backendConversationId:
+      existingConversation?.backendConversationId ?? null,
+    messages: currentMessages,
+    updatedAt: Date.now(),
+  };
+
+  setActiveConversationId(frontendId);
+  setMessages(currentMessages);
+  setConversations((previous) => [
+    conversation,
+    ...previous.filter((item) => item.id !== frontendId),
+  ]);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/rag/graph/ask`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        question: text,
+        limit: 5,
+        ...(conversation.backendConversationId
+          ? { conversation_id: conversation.backendConversationId }
+          : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(
+        `Backend returned ${response.status}: ${detail.slice(0, 300)}`
+      );
+    }
+
+    const data: AskResponse = await response.json();
+
+    const assistantMessage: ChatMessage = {
       id: crypto.randomUUID(),
-      role: "user",
-      content: text,
+      role: "assistant",
+      content: data.answer || "The backend returned an empty answer.",
+      sources: data.sources ?? [],
+      citationWarnings: data.citation_warnings ?? [],
     };
 
-    setMessages((previous) => [...previous, userMessage]);
+    const updatedMessages = [...currentMessages, assistantMessage];
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/rag/graph/ask`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          question: text,
-          limit: 5,
-          ...(conversationId
-            ? { conversation_id: conversationId }
-            : {}),
-        }),
-      });
+    setConversationId(data.conversation_id);
+    setMessages(updatedMessages);
 
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(
-          `Backend returned ${response.status}: ${detail.slice(0, 300)}`
-        );
-      }
+    setConversations((previous) => [
+      {
+        ...conversation,
+        backendConversationId: data.conversation_id,
+        messages: updatedMessages,
+        updatedAt: Date.now(),
+      },
+      ...previous.filter((item) => item.id !== frontendId),
+    ]);
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "An unexpected error occurred.";
 
-      const data: AskResponse = await response.json();
+    setError(
+      `${message}. Check that FastAPI is running and the API URL is correct.`
+    );
 
-      if (data.conversation_id) {
-        setConversationId(data.conversation_id);
-      }
-
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.answer || "The backend returned an empty answer.",
-        sources: data.sources ?? [],
-        citationWarnings: data.citation_warnings ?? [],
-      };
-
-      setMessages((previous) => [...previous, assistantMessage]);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "An unexpected error occurred.";
-
-      setError(
-        `${message}. Check that FastAPI is running and the API URL is correct.`
-      );
-
-      // Keep the user's question visible if the request fails.
-      setQuestion(text);
-    } finally {
-      setLoading(false);
-      inputRef.current?.focus();
-    }
+    setQuestion(text);
+  } finally {
+    setLoading(false);
+    inputRef.current?.focus();
   }
+}
 
+
+// Auto save
 useEffect(() => {
   if (!hydrated) return;
-
-  if (messages.length === 0 && conversationId === null) {
-    localStorage.removeItem(STORAGE_KEY);
-    return;
-  }
 
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      messages,
-      conversationId,
+      conversations,
+      activeConversationId,
     })
   );
-}, [messages, conversationId, hydrated]);
+}, [conversations, activeConversationId, hydrated]);
 
-  function startNewConversation() {
-    setMessages([]);
-    setQuestion("");
-    setConversationId(null);
-    setError("");
-    inputRef.current?.focus();
-  }
+const openConversation = (conversation: Conversation) => {
+  if (loading) return;
+
+  setActiveConversationId(conversation.id);
+  setMessages(conversation.messages ?? []);
+  setConversationId(conversation.backendConversationId ?? null);
+  setQuestion("");
+  setError("");
+};
+
+
+  const startNewConversation = () => {
+  if (loading) return;
+
+  setActiveConversationId(null);
+  setMessages([]);
+  setConversationId(null);
+  setQuestion("");
+  setError("");
+  inputRef.current?.focus();
+};
 
   return (
     <main className="flex h-dvh overflow-hidden bg-[#f7f8fa] text-slate-900">
@@ -252,12 +318,49 @@ useEffect(() => {
           <p className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
             Workspace
           </p>
-
-          <div className="flex items-center gap-3 rounded-lg bg-indigo-50 px-3 py-3 text-sm font-medium text-indigo-700">
-            <MessageSquare size={17} />
-            Document assistant
-          </div>
         </div>
+
+        
+<div className="mt-6 min-h-0 flex-1 overflow-y-auto">
+  <p className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+    Conversation history
+  </p>
+
+  {conversations.length === 0 ? (
+    <p className="px-2 py-2 text-xs leading-5 text-slate-400">
+      Your conversations will appear here.
+    </p>
+  ) : (
+    <div className="space-y-1">
+      {[...conversations]
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((conversation) => (
+          <button
+            key={conversation.id}
+            type="button"
+            onClick={() => openConversation(conversation)}
+            disabled={loading}
+            title={conversation.title}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left text-sm transition disabled:opacity-50 ${
+              activeConversationId === conversation.id
+                ? "bg-indigo-50 font-medium text-indigo-700"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <MessageSquare
+              size={16}
+              className="shrink-0"
+            />
+
+            <span className="min-w-0 flex-1 truncate">
+              {conversation.title}
+            </span>
+          </button>
+        ))}
+    </div>
+  )}
+</div>
+
 
         <div className="mt-auto rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-medium">
