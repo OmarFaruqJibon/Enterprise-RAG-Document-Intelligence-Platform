@@ -10,6 +10,8 @@ from app.vectorstore.collection import create_collection
 from app.vectorstore.ingestion import ingest_pdf
 from app.vectorstore.retrieval import search_documents
 
+from fastapi.middleware.cors import CORSMiddleware
+
 
 from app.rag.graph import run_rag_graph
 
@@ -23,6 +25,17 @@ app = FastAPI(
     title="KnowledgeFlow AI",
     description="Enterprise RAG & Document Intelligence Platform",
     version="0.0.1",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
